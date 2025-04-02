@@ -8,14 +8,24 @@
 
 Test-Command:
     towncrier --version
-Depends:
-    @
 Restrictions:
     build-needed,
     superficial
+Depends:
+    python3-all,
+    @
+
+Tests: smoke-python3
+Restrictions:
+    build-needed,
+    superficial
+Depends:
+    python3-package-smoke-test,
+    python3-all,
+    @
 
 
-# Copyright © 2022–2023 Ben Finney <bignose@debian.org>
+# Copyright © 2022–2024 Ben Finney <bignose@debian.org>
 # This is free software: you may copy, modify, and/or distribute this work
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation; version 3 of that license or any later version.

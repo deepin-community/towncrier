@@ -1,6 +1,2 @@
-avoid-bytes-type-in-test-process-output.patch
 test-current-version-in-output.patch
-test-executable-via-clirunner.patch
-rename-executable-program.patch
 remove-tracking-from-documentation.patch
-move-overall-manual-page-to-correct-section.patch

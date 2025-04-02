@@ -2,22 +2,22 @@ Description: Test the actual current version is in the test output.
  .
  The unit test case for the ‘--version’ option now tests that the actual
  current Towncrier version string, is in the test output.
-Bug-GitHub: https://github.com/twisted/towncrier/issues/480
 Author: Ben Finney <bignose@debian.org>
-Last-Update: 2023-02-15
+Last-Update: 2024-10-20
+Forwarded: https://github.com/twisted/towncrier/issues/480
 
 diff --git old/src/towncrier/test/test_project.py new/src/towncrier/test/test_project.py
 --- old/src/towncrier/test/test_project.py
 +++ new/src/towncrier/test/test_project.py
-@@ -202,4 +202,7 @@ class InvocationTests(TestCase):
+@@ -249,4 +249,7 @@ class InvocationTests(TestCase):
          """
-         out = check_output(["towncrier", "--version"])
-         out_text = out.decode(sys.stdout.encoding)
--        self.assertTrue(out_text.startswith("towncrier, version 2"))
+         runner = CliRunner()
+         result = runner.invoke(towncrier_cli, ["--version"])
+-        self.assertTrue(result.output.startswith("towncrier, version 2"))
 +        expected_program_version = metadata_version("towncrier")
 +        expected_result = "towncrier, version {}".format(
 +            expected_program_version)
-+        self.assertTrue(out_text.startswith(expected_result))
++        self.assertTrue(result.output.startswith(expected_result))
 
 Local variables:
 coding: utf-8

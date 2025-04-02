@@ -1,13 +1,0 @@
-# debian/towncrier.lintian-overrides
-# Overrides for Lintian checks of ‘towncrier’ package.
-# Documentation: ‘/usr/share/doc/lintian/lintian’ §2.4.
-
-# The application directory contains the private Python package.
-repeated-path-segment towncrier [usr/share/towncrier/towncrier/]
-
-
-# Local variables:
-# coding: utf-8
-# mode: conf-space
-# End:
-# vim: fileencoding=utf-8 filetype=conf :

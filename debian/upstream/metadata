@@ -18,7 +18,7 @@ Repository-Browse: https://github.com/twisted/towncrier
 Changelog: https://github.com/twisted/towncrier/blob/master/NEWS.rst
 
 
-# Copyright © 2019–2023 Ben Finney <bignose@debian.org>
+# Copyright © 2019–2024 Ben Finney <bignose@debian.org>
 #
 # This is free software; you may copy, modify, and/or distribute this work
 # under the terms of the GNU General Public License, version 3 or later.

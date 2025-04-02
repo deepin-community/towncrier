@@ -1,0 +1,6 @@
+# debian/salsa-ci.yaml
+# Pipeline definition for Salsa Continuous Integration.
+# Documentation: <URL:https://salsa.debian.org/salsa-ci-team/pipeline>.
+---
+include:
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml

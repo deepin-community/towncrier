@@ -1,12 +1,0 @@
-# debian/towncrier.install
-# Files to install for Debian package ‘towncrier’.
-# Manual page: ‘dh_install(1)’.
-
-usr/share/towncrier/*
-
-
-# Local variables:
-# coding: utf-8
-# mode: conf-space
-# End:
-# vim: fileencoding=utf-8 filetype=conf :

@@ -13,10 +13,6 @@ cute-field VCS-Git vs Vcs-Git [debian/control:*]
 # <URL:https://github.com/twisted/towncrier/pull/326>.
 maintainer-manual-page [debian/towncrier.1]
 
-# We are deliberately using Distutils to build and install,
-# until a PEP-517-conformant builder supports custom install directories.
-missing-prerequisite-for-pyproject-backend setuptools.build_meta (does not satisfy *) [pyproject.toml:*]
-
 
 # Local variables:
 # coding: utf-8

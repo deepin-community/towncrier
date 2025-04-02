@@ -38,7 +38,7 @@ def _get_default_compare_branch(branches: Container[str]) -> str | None:
     default=None,
     metavar="BRANCH",
     help=(
-        "Checks files changed running git diff --name-ony BRANCH... "
+        "Checks files changed running git diff --name-only BRANCH... "
         "BRANCH is the branch to be compared with. "
         "Default to origin/main"
     ),
@@ -67,7 +67,6 @@ def _main(compare_with: str | None, directory: str | None, config: str | None) -
 def __main(
     comparewith: str | None, directory: str | None, config_path: str | None
 ) -> None:
-
     base_directory, config = load_config_from_options(directory, config_path)
 
     if comparewith is None:
@@ -94,9 +93,7 @@ def __main(
         )
         sys.exit(0)
 
-    files = {
-        os.path.normpath(os.path.join(base_directory, path)) for path in files_changed
-    }
+    files = {os.path.abspath(path) for path in files_changed}
 
     click.echo("Looking at these files:")
     click.echo("----")
@@ -104,33 +101,31 @@ def __main(
         click.echo(f"{n}. {change}")
     click.echo("----")
 
+    # This will fail if any fragment files have an invalid name:
+    all_fragment_files = find_fragments(base_directory, config, strict=True)[1]
+
     news_file = os.path.normpath(os.path.join(base_directory, config.filename))
     if news_file in files:
         click.echo("Checks SKIPPED: news file changes detected.")
         sys.exit(0)
 
-    if config.directory:
-        fragment_base_directory = os.path.abspath(config.directory)
-        fragment_directory = None
-    else:
-        fragment_base_directory = os.path.abspath(
-            os.path.join(base_directory, config.package_dir, config.package)
-        )
-        fragment_directory = "newsfragments"
-
-    fragments = {
-        os.path.normpath(path)
-        for path in find_fragments(
-            fragment_base_directory,
-            config.sections,
-            fragment_directory,
-            config.types.keys(),
-        )[1]
-    }
+    fragments = set()  # will only include fragments of types that are checked
+    unchecked_fragments = set()  # will include fragments of types that are not checked
+    for fragment_filename, category in all_fragment_files:
+        if config.types[category]["check"]:
+            fragments.add(fragment_filename)
+        else:
+            unchecked_fragments.add(fragment_filename)
     fragments_in_branch = fragments & files
 
     if not fragments_in_branch:
-        click.echo("No new newsfragments found on this branch.")
+        unchecked_fragments_in_branch = unchecked_fragments & files
+        if unchecked_fragments:
+            click.echo("Found newsfragments of unchecked types in the branch:")
+            for n, fragment in enumerate(unchecked_fragments_in_branch, start=1):
+                click.echo(f"{n}. {fragment}")
+        else:
+            click.echo("No new newsfragments found on this branch.")
         sys.exit(1)
     else:
         click.echo("Found:")

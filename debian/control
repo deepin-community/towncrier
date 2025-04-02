@@ -3,23 +3,22 @@ Maintainer: Ben Finney <bignose@debian.org>
 Section: devel
 Priority: optional
 Build-Depends-Indep:
-    git,
     furo,
-    python3-sphinx,
-    python3-twisted,
-    python3-pytest,
-    python3-mock,
-    python3-click-default-group,
+    git,
+    pybuild-plugin-pyproject,
     python3-click,
+    python3-click-default-group,
+    python3-hatchling,
     python3-incremental,
     python3-jinja2,
-    python3-toml,
+    python3-pytest,
+    python3-tomli,
+    python3-twisted <!nocheck>,
     python3
 Build-Depends:
     dh-python,
-    python3-setuptools,
     debhelper-compat (= 13)
-Standards-Version: 4.6.2
+Standards-Version: 4.7.0
 Homepage: https://github.com/twisted/towncrier/
 VCS-Git: https://salsa.debian.org/debian/pkg-towncrier.git
 VCS-Browser: https://salsa.debian.org/debian/pkg-towncrier/
@@ -28,11 +27,8 @@ Rules-Requires-Root: no
 Package: towncrier
 Architecture: all
 Depends:
-    python3-setuptools,
     ${python3:Depends},
     ${misc:Depends}
-Suggests:
-    towncrier-doc
 Description: compiler for project news file
  Towncrier is a utility to produce useful, summarised news files for your
  project. Rather than reading the VCS history as some newer tools do, or having
@@ -48,19 +44,3 @@ Description: compiler for project news file
  issue, how it was fixed, who authored the fix, and who reviewed the fix). By
  compiling a collection of these fragments, towncrier can produce a digest of
  the changes which is valuable to those who may wish to use the software.
-
-Package: towncrier-doc
-Architecture: all
-Section: doc
-Depends:
-    ${sphinxdoc:Depends},
-    ${misc:Depends}
-Suggests:
-    towncrier
-Description: compiler for project news file — documentation
- Towncrier is a utility to produce useful, summarised news files for your
- project. Rather than reading the VCS history as some newer tools do, or having
- one single file which developers all write to, towncrier reads “news fragments”
- which contain information *useful to end users*.
- .
- This package installs the usage documentation for Towncrier.
