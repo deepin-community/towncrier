@@ -1,12 +1,0 @@
-# debian/towncrier-doc.docs
-# Documentation files to install during ‘towncrier-doc’ package build.
-# Manual page: ‘dh_installdocs(1)’.
-
-docs/_build/html/
-
-
-# Local variables:
-# coding: utf-8
-# mode: conf
-# End:
-# vim: fileencoding=utf-8 filetype=conf :

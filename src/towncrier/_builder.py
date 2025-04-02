@@ -5,27 +5,21 @@
 from __future__ import annotations
 
 import os
+import re
 import textwrap
-import traceback
 
-from collections import OrderedDict, defaultdict
-from typing import Any, DefaultDict, Iterable, Iterator, Mapping, Sequence
+from collections import defaultdict
+from fnmatch import fnmatch
+from pathlib import Path
+from typing import Any, DefaultDict, Iterable, Iterator, Mapping, NamedTuple, Sequence
 
+from click import ClickException
 from jinja2 import Template
 
-from ._settings import ConfigError
+from towncrier._settings.load import Config
 
 
-def strip_if_integer_string(s: str) -> str:
-    try:
-        i = int(s)
-    except ValueError:
-        return s
-
-    return str(i)
-
-
-# Returns ticket, category and counter or (None, None, None) if the basename
+# Returns issue, category and counter or (None, None, None) if the basename
 # could not be parsed or doesn't contain a valid category.
 def parse_newfragment_basename(
     basename: str, frag_type_names: Iterable[str]
@@ -35,120 +29,185 @@ def parse_newfragment_basename(
 
     if len(parts) == 1:
         return invalid
-    if len(parts) == 2:
-        ticket, category = parts
-        ticket = strip_if_integer_string(ticket)
-        return (ticket, category, 0) if category in frag_type_names else invalid
 
-    # There are at least 3 parts. Search for a valid category from the second
-    # part onwards.
+    # There are at least 2 parts. Search for a valid category from the second
+    # part onwards starting at the back.
     # The category is used as the reference point in the parts list to later
     # infer the issue number and counter value.
-    for i in range(1, len(parts)):
+    for i in reversed(range(1, len(parts))):
         if parts[i] in frag_type_names:
             # Current part is a valid category according to given definitions.
             category = parts[i]
-            # Use the previous part as the ticket number.
+            # Use all previous parts as the issue number.
             # NOTE: This allows news fragment names like fix-1.2.3.feature or
-            # something-cool.feature.ext for projects that don't use ticket
+            # something-cool.feature.ext for projects that don't use issue
             # numbers in news fragment names.
-            ticket = strip_if_integer_string(parts[i - 1])
+            issue = ".".join(parts[0:i]).strip()
+            # If the issue is an integer, remove any leading zeros (to resolve
+            # issue #126).
+            if issue.isdigit():
+                issue = str(int(issue))
             counter = 0
             # Use the following part as the counter if it exists and is a valid
             # digit.
             if len(parts) > (i + 1) and parts[i + 1].isdigit():
                 counter = int(parts[i + 1])
-            return ticket, category, counter
+            return issue, category, counter
     else:
         # No valid category found.
         return invalid
 
 
+class FragmentsPath:
+    """
+    A helper to get the full path to a fragments directory.
+
+    This is a callable that optionally takes a section directory and returns the full
+    path to the fragments directory for that section (or the default if no section is
+    provided).
+    """
+
+    def __init__(self, base_directory: str, config: Config):
+        self.base_directory = base_directory
+        self.config = config
+        if config.directory is not None:
+            self.base_directory = os.path.abspath(
+                os.path.join(base_directory, config.directory)
+            )
+            self.append_directory = ""
+        else:
+            self.base_directory = os.path.abspath(
+                os.path.join(base_directory, config.package_dir, config.package)
+            )
+            self.append_directory = "newsfragments"
+
+    def __call__(self, section_directory: str = "") -> str:
+        return os.path.join(
+            self.base_directory, section_directory, self.append_directory
+        )
+
+
 # Returns a structure like:
 #
-# OrderedDict([
-#   ("",
-#    {
-#      ("142", "misc"): u"",
-#      ("1", "feature"): u"some cool description",
-#    }),
-#   ("Names", {}),
-#   ("Web", {("3", "bugfix"): u"Fixed a thing"}),
-# ])
+# {
+#     "": {
+#         ("142", "misc", 1): "",
+#         ("1", "feature", 1): "some cool description",
+#     },
+#     "Names": {},
+#     "Web": {("3", "bugfix", 1): "Fixed a thing"},
+# }
+#
+# and a list like:
+# [
+#    ("/path/to/fragments/142.misc.1", "misc"),
+#    ("/path/to/fragments/1.feature.1", "feature"),
+# ]
 #
 # We should really use attrs.
-#
-# Also returns a list of the paths that the fragments were taken from.
 def find_fragments(
     base_directory: str,
-    sections: Mapping[str, str],
-    fragment_directory: str | None,
-    frag_type_names: Iterable[str],
-    orphan_prefix: str | None = None,
-) -> tuple[Mapping[str, Mapping[tuple[str, str, int], str]], list[str]]:
+    config: Config,
+    strict: bool,
+) -> tuple[Mapping[str, Mapping[tuple[str, str, int], str]], list[tuple[str, str]]]:
     """
     Sections are a dictonary of section names to paths.
+
+    If strict, raise ClickException if any fragments have an invalid name.
     """
-    content = OrderedDict()
-    fragment_filenames = []
+    ignored_files = {
+        ".gitignore",
+        ".gitkeep",
+        ".keep",
+        "readme",
+        "readme.md",
+        "readme.rst",
+    }
+    if isinstance(config.template, str):
+        # Template can be a tuple of (package_name, resource_name).
+        #
+        # See https://github.com/twisted/towncrier/issues/634
+        ignored_files.add(os.path.basename(config.template))
+    if config.ignore:
+        ignored_files.update(filename.lower() for filename in config.ignore)
+
+    get_section_path = FragmentsPath(base_directory, config)
+
+    content = {}
+    fragment_files = []
     # Multiple orphan news fragments are allowed per section, so initialize a counter
     # that can be incremented automatically.
     orphan_fragment_counter: DefaultDict[str | None, int] = defaultdict(int)
 
-    for key, val in sections.items():
-
-        if fragment_directory is not None:
-            section_dir = os.path.join(base_directory, val, fragment_directory)
-        else:
-            section_dir = os.path.join(base_directory, val)
+    for key, section_dir in config.sections.items():
+        section_dir = get_section_path(section_dir)
 
         try:
             files = os.listdir(section_dir)
-        except FileNotFoundError as e:
-            message = "Failed to list the news fragment files.\n{}".format(
-                "".join(traceback.format_exception_only(type(e), e)),
-            )
-            raise ConfigError(message)
+        except FileNotFoundError:
+            files = []
 
         file_content = {}
 
         for basename in files:
+            if any(
+                [
+                    fnmatch(basename.lower(), ignore_pattern)
+                    for ignore_pattern in ignored_files
+                ]
+            ):
+                continue
 
-            ticket, category, counter = parse_newfragment_basename(
-                basename, frag_type_names
+            issue, category, counter = parse_newfragment_basename(
+                basename, config.types
             )
             if category is None:
+                if strict and issue is None:
+                    raise ClickException(
+                        f"Invalid news fragment name: {basename}\n"
+                        "If this filename is deliberate, add it to "
+                        "'ignore' in your configuration."
+                    )
                 continue
-            assert ticket is not None
+            assert issue is not None
             assert counter is not None
-            if orphan_prefix and ticket.startswith(orphan_prefix):
-                ticket = ""
+            if config.orphan_prefix and issue.startswith(config.orphan_prefix):
+                issue = ""
                 # Use and increment the orphan news fragment counter.
                 counter = orphan_fragment_counter[category]
                 orphan_fragment_counter[category] += 1
 
+            if (
+                config.issue_pattern
+                and issue  # not orphan
+                and not re.fullmatch(config.issue_pattern, issue)
+            ):
+                raise ClickException(
+                    f"Issue name '{issue}' does not match the "
+                    f"configured pattern, '{config.issue_pattern}'"
+                )
             full_filename = os.path.join(section_dir, basename)
-            fragment_filenames.append(full_filename)
-            with open(full_filename, "rb") as f:
-                data = f.read().decode("utf8", "replace")
+            fragment_files.append((full_filename, category))
+            data = Path(full_filename).read_text(encoding="utf-8", errors="replace")
 
-            if (ticket, category, counter) in file_content:
+            if (issue, category, counter) in file_content:
                 raise ValueError(
                     "multiple files for {}.{} in {}".format(
-                        ticket, category, section_dir
+                        issue, category, section_dir
                     )
                 )
-            file_content[ticket, category, counter] = data
+            file_content[issue, category, counter] = data
 
         content[key] = file_content
 
-    return content, fragment_filenames
+    return content, fragment_files
 
 
 def indent(text: str, prefix: str) -> str:
     """
     Adds `prefix` to the beginning of non-empty lines in `text`.
     """
+
     # Based on Python 3's textwrap.indent
     def prefixed_lines() -> Iterator[str]:
         for line in text.splitlines(True):
@@ -165,14 +224,12 @@ def split_fragments(
     definitions: Mapping[str, Mapping[str, Any]],
     all_bullets: bool = True,
 ) -> Mapping[str, Mapping[str, Mapping[str, Sequence[str]]]]:
-
-    output = OrderedDict()
+    output = {}
 
     for section_name, section_fragments in fragments.items():
         section: dict[str, dict[str, list[str]]] = {}
 
-        for (ticket, category, counter), content in section_fragments.items():
-
+        for (issue, category, counter), content in section_fragments.items():
             if all_bullets:
                 # By default all fragmetns are append by "-" automatically,
                 # and need to be indented because of that.
@@ -182,35 +239,66 @@ def split_fragments(
                 # Assume the text is formatted correctly
                 content = content.rstrip()
 
-            if definitions[category]["showcontent"] is False:
+            if definitions[category]["showcontent"] is False and issue:
+                # If this category is not supposed to show content (and we have an
+                # issue) then we should just add the issue to the section rather than
+                # the content. If there isn't an issue, still add the content so that
+                # it's recorded.
                 content = ""
 
-            texts = section.setdefault(category, OrderedDict())
+            texts = section.setdefault(category, {})
 
-            tickets = texts.setdefault(content, [])
-            if ticket:
-                # Only add the ticket if we have one (it can be blank for orphan news
+            issues = texts.setdefault(content, [])
+            if issue:
+                # Only add the issue if we have one (it can be blank for orphan news
                 # fragments).
-                tickets.append(ticket)
-                tickets.sort()
+                issues.append(issue)
+                issues.sort()
 
         output[section_name] = section
 
     return output
 
 
-def issue_key(issue: str) -> tuple[int, str]:
-    # We want integer issues to sort as integers, and we also want string
-    # issues to sort as strings. We arbitrarily put string issues before
-    # integer issues (hopefully no-one uses both at once).
-    try:
-        return (int(issue), "")
-    except Exception:
-        # Maybe we should sniff strings like "gh-10" -> (10, "gh-10")?
-        return (-1, issue)
+class IssueParts(NamedTuple):
+    is_digit: bool
+    has_digit: bool
+    non_digit_part: str
+    number: int
 
 
-def entry_key(entry: tuple[str, Sequence[str]]) -> tuple[str, list[tuple[int, str]]]:
+def issue_key(issue: str) -> IssueParts:
+    """
+    Used to sort the issue ID inside a news fragment in a human-friendly way.
+
+    Issue IDs are grouped by their non-integer part, then sorted by their integer part.
+
+    For backwards compatible consistency, issues without no number are sorted first and
+    digit only issues are sorted last.
+
+    For example::
+
+    >>> sorted(["2", "#11", "#3", "gh-10", "gh-4", "omega", "alpha"], key=issue_key)
+    ['alpha', 'omega', '#3', '#11', 'gh-4', 'gh-10', '2']
+    """
+    if issue.isdigit():
+        return IssueParts(
+            is_digit=True, has_digit=True, non_digit_part="", number=int(issue)
+        )
+    match = re.search(r"\d+", issue)
+    if not match:
+        return IssueParts(
+            is_digit=False, has_digit=False, non_digit_part=issue, number=-1
+        )
+    return IssueParts(
+        is_digit=False,
+        has_digit=True,
+        non_digit_part=issue[: match.start()] + issue[match.end() :],
+        number=int(match.group()),
+    )
+
+
+def entry_key(entry: tuple[str, Sequence[str]]) -> tuple[str, list[IssueParts]]:
     content, issues = entry
     # Orphan news fragments (those without any issues) should sort last by content.
     return "" if issues else content, [issue_key(issue) for issue in issues]
@@ -258,13 +346,15 @@ def render_fragments(
 
     jinja_template = Template(template, trim_blocks=True)
 
-    data: dict[str, dict[str, dict[str, list[str]]]] = OrderedDict()
+    data: dict[str, dict[str, dict[str, list[str]]]] = {}
+    issues_by_category: dict[str, dict[str, list[str]]] = {}
 
     for section_name, section_value in fragments.items():
-
-        data[section_name] = OrderedDict()
+        data[section_name] = {}
+        issues_by_category[section_name] = {}
 
         for category_name, category_value in section_value.items():
+            category_issues: set[str] = set()
             # Suppose we start with an ordering like this:
             #
             # - Fix the thing (#7, #123, #2)
@@ -277,6 +367,7 @@ def render_fragments(
             entries = []
             for text, issues in category_value.items():
                 entries.append((text, sorted(issues, key=issue_key)))
+                category_issues.update(issues)
 
             # Then we sort the lines:
             #
@@ -288,12 +379,16 @@ def render_fragments(
 
             # Then we put these nicely sorted entries back in an ordered dict
             # for the template, after formatting each issue number
-            categories = OrderedDict()
+            categories = {}
             for text, issues in entries:
                 rendered = [render_issue(issue_format, i) for i in issues]
                 categories[text] = rendered
 
             data[section_name][category_name] = categories
+            issues_by_category[section_name][category_name] = [
+                render_issue(issue_format, i)
+                for i in sorted(category_issues, key=issue_key)
+            ]
 
     done = []
 
@@ -315,6 +410,7 @@ def render_fragments(
         versiondata=versiondata,
         top_underline=top_underline,
         get_indent=get_indent,  # simplify indentation in the jinja template.
+        issues_by_category=issues_by_category,
     )
 
     for line in res.split("\n"):
@@ -331,4 +427,4 @@ def render_fragments(
         else:
             done.append(line)
 
-    return "\n".join(done).rstrip() + "\n"
+    return "\n".join(done)

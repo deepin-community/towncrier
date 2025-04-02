@@ -27,7 +27,7 @@ License-Grant:
 
 Files: debian/*
 Copyright:
-    © 2010–2023 Ben Finney <bignose@debian.org>
+    © 2010–2024 Ben Finney <bignose@debian.org>
 License: GPL-3+
 License-Grant:
     This is free software: you may copy, modify, and/or distribute this work

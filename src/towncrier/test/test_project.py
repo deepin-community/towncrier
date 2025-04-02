@@ -4,19 +4,17 @@
 import os
 import sys
 
-from subprocess import check_output
-from unittest import skipIf
+from importlib.metadata import version as metadata_version
 
+from click.testing import CliRunner
 from twisted.trial.unittest import TestCase
 
 from .._project import get_project_name, get_version
+from .._shell import cli as towncrier_cli
 from .helpers import write
 
 
-try:
-    from importlib.metadata import version as metadata_version
-except ImportError:
-    metadata_version = None
+towncrier_cli.name = "towncrier"
 
 
 class VersionFetchingTests(TestCase):
@@ -25,7 +23,6 @@ class VersionFetchingTests(TestCase):
         A str __version__ will be picked up.
         """
         temp = self.mktemp()
-        os.makedirs(temp)
         os.makedirs(os.path.join(temp, "mytestproj"))
 
         with open(os.path.join(temp, "mytestproj", "__init__.py"), "w") as f:
@@ -39,7 +36,6 @@ class VersionFetchingTests(TestCase):
         A tuple __version__ will be picked up.
         """
         temp = self.mktemp()
-        os.makedirs(temp)
         os.makedirs(os.path.join(temp, "mytestproja"))
 
         with open(os.path.join(temp, "mytestproja", "__init__.py"), "w") as f:
@@ -48,15 +44,78 @@ class VersionFetchingTests(TestCase):
         version = get_version(temp, "mytestproja")
         self.assertEqual(version, "1.3.12")
 
-    @skipIf(metadata_version is None, "Needs importlib.metadata.")
     def test_incremental(self):
         """
-        An incremental Version __version__  is picked up.
+        An incremental-like Version __version__  is picked up.
         """
-        pkg = "../src"
+        temp = self.mktemp()
+        os.makedirs(temp)
+        os.makedirs(os.path.join(temp, "mytestprojinc"))
 
-        self.assertEqual(metadata_version("towncrier"), get_version(pkg, "towncrier"))
-        self.assertEqual("towncrier", get_project_name(pkg, "towncrier"))
+        with open(os.path.join(temp, "mytestprojinc", "__init__.py"), "w") as f:
+            f.write(
+                """
+class Version:
+    '''
+    This is emulating a Version object from incremental.
+    '''
+
+    def __init__(self, *version_parts):
+        self.version = version_parts
+        self.package = "mytestprojinc"
+
+    def base(self):
+        return '.'.join(map(str, self.version))
+
+__version__ = Version(1, 3, 12, "rc1")
+                """
+            )
+
+        version = get_version(temp, "mytestprojinc")
+        self.assertEqual(version, "1.3.12rc1")
+
+        project = get_project_name(temp, "mytestprojinc")
+        self.assertEqual(project, "mytestprojinc")
+
+    def test_not_incremental(self):
+        """
+        An exception is raised when the version could not be detected.
+        For this test we use an incremental-like object,
+        that has the `base` method, but that method
+        does not match the return type for `incremental`.
+        """
+        temp = self.mktemp()
+        os.makedirs(os.path.join(temp, "mytestprojnotinc"))
+
+        with open(os.path.join(temp, "mytestprojnotinc", "__init__.py"), "w") as f:
+            f.write(
+                """
+class WeirdVersion:
+    def base(self, some_arg):
+        return "shouldn't get here"
+
+
+__version__ = WeirdVersion()
+"""
+            )
+        with self.assertRaises(Exception) as e:
+            get_version(temp, "mytestprojnotinc")
+
+        self.assertEqual(
+            (
+                "Version must be a string, tuple, or an Incremental Version. "
+                "If you can't provide that, use the --version argument and "
+                "specify one.",
+            ),
+            e.exception.args,
+        )
+
+    def test_version_from_metadata(self):
+        """
+        A version from package metadata is picked up.
+        """
+        version = get_version(".", "towncrier")
+        self.assertEqual(metadata_version("towncrier"), version)
 
     def _setup_missing(self):
         """
@@ -79,10 +138,12 @@ class VersionFetchingTests(TestCase):
         tmp_dir = self._setup_missing()
 
         with self.assertRaises(Exception) as e:
+            # The 'missing' package has no __version__ string.
             get_version(tmp_dir, "missing")
 
         self.assertEqual(
-            ("No __version__, I don't know how else to look",), e.exception.args
+            ("No __version__ or metadata version info for the 'missing' package.",),
+            e.exception.args,
         )
 
     def test_missing_version_project_name(self):
@@ -99,7 +160,6 @@ class VersionFetchingTests(TestCase):
         A __version__ of unknown type will lead to an exception.
         """
         temp = self.mktemp()
-        os.makedirs(temp)
         os.makedirs(os.path.join(temp, "mytestprojb"))
 
         with open(os.path.join(temp, "mytestprojb", "__init__.py"), "w") as f:
@@ -107,7 +167,7 @@ class VersionFetchingTests(TestCase):
 
         self.assertRaises(Exception, get_version, temp, "mytestprojb")
 
-        self.assertRaises(TypeError, get_project_name, temp, "mytestprojb")
+        self.assertEqual("Mytestprojb", get_project_name(temp, "mytestprojb"))
 
     def test_import_fails(self):
         """
@@ -123,14 +183,12 @@ class VersionFetchingTests(TestCase):
         project_name = "mytestproj_already_installed_import"
 
         temp = self.mktemp()
-        os.makedirs(temp)
         os.makedirs(os.path.join(temp, project_name))
 
         with open(os.path.join(temp, project_name, "__init__.py"), "w") as f:
             f.write("__version__ = (1, 3, 12)")
 
         sys_path_temp = self.mktemp()
-        os.makedirs(sys_path_temp)
         os.makedirs(os.path.join(sys_path_temp, project_name))
 
         with open(os.path.join(sys_path_temp, project_name, "__init__.py"), "w") as f:
@@ -151,7 +209,6 @@ class VersionFetchingTests(TestCase):
         project_name = "mytestproj_only_installed"
 
         sys_path_temp = self.mktemp()
-        os.makedirs(sys_path_temp)
         os.makedirs(os.path.join(sys_path_temp, project_name))
 
         with open(os.path.join(sys_path_temp, project_name, "__init__.py"), "w") as f:
@@ -170,6 +227,7 @@ class InvocationTests(TestCase):
         """
         `python -m towncrier` invokes the main entrypoint.
         """
+        runner = CliRunner()
         temp = self.mktemp()
         new_dir = os.path.join(temp, "dashm")
         os.makedirs(new_dir)
@@ -179,9 +237,9 @@ class InvocationTests(TestCase):
             with open("pyproject.toml", "w") as f:
                 f.write("[tool.towncrier]\n" 'directory = "news"\n')
             os.makedirs("news")
-            out = check_output([sys.executable, "-m", "towncrier", "--help"])
-            self.assertIn(b"[OPTIONS] COMMAND [ARGS]...", out)
-            self.assertRegex(out, rb".*--help\s+Show this message and exit.")
+            result = runner.invoke(towncrier_cli, ["--help"])
+            self.assertIn("[OPTIONS] COMMAND [ARGS]...", result.stdout)
+            self.assertRegex(result.stdout, r".*--help\s+Show this message and exit.")
         finally:
             os.chdir(orig_dir)
 
@@ -189,5 +247,6 @@ class InvocationTests(TestCase):
         """
         `--version` command line option is available to show the current production version.
         """
-        out = check_output(["towncrier", "--version"])
-        self.assertTrue(out.startswith(b"towncrier, version 2"))
+        runner = CliRunner()
+        result = runner.invoke(towncrier_cli, ["--version"])
+        self.assertTrue(result.output.startswith("towncrier, version 2"))

@@ -11,16 +11,14 @@ from __future__ import annotations
 
 import click
 
-from click_default_group import DefaultGroup
-
-from ._version import __version__
 from .build import _main as _build_cmd
 from .check import _main as _check_cmd
+from .click_default_group import DefaultGroup
 from .create import _main as _create_cmd
 
 
 @click.group(cls=DefaultGroup, default="build", default_if_no_args=True)
-@click.version_option(__version__.public())
+@click.version_option()
 def cli() -> None:
     """
     Towncrier is a utility to produce useful, summarised news files for your project.

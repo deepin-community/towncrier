@@ -17,8 +17,10 @@ def pre_commit(session: nox.Session) -> None:
     session.run("pre-commit", "run", "--all-files", "--show-diff-on-failure")
 
 
-@nox.session(python=["pypy3.7", "pypy3.8", "3.7", "3.8", "3.9", "3.10", "3.11"])
+# Keep list in-sync with ci.yml/test-linux & pyproject.toml
+@nox.session(python=["pypy3.8", "3.8", "3.9", "3.10", "3.11", "3.12"])
 def tests(session: nox.Session) -> None:
+    session.env["PYTHONWARNDEFAULTENCODING"] = "1"
     session.install("Twisted", "coverage[toml]")
     posargs = list(session.posargs)
 
@@ -37,8 +39,6 @@ def tests(session: nox.Session) -> None:
 
     if os.environ.get("CI") != "true":
         session.notify("coverage_report")
-    else:
-        session.run("coverage", "combine")
 
 
 @nox.session
@@ -56,14 +56,16 @@ def check_newsfragment(session: nox.Session) -> None:
 
 
 @nox.session
-def check_manifest(session: nox.Session) -> None:
-    session.install("check-manifest")
-    session.run("check-manifest")
+def draft_newsfragment(session: nox.Session) -> None:
+    session.install(".")
+    session.run("python", "-m", "towncrier.build", "--draft")
 
 
 @nox.session
 def typecheck(session: nox.Session) -> None:
-    session.install(".", "mypy", "types-setuptools")
+    # Click 8.1.4 is bad type hints -- lets not complicate packaging and only
+    # pin here.
+    session.install(".", "mypy", "click!=8.1.4")
     session.run("mypy", "src")
 
 
@@ -87,11 +89,10 @@ def docs(session: nox.Session) -> None:
 
 @nox.session
 def build(session: nox.Session) -> None:
-    session.install("build", "check-manifest>=0.44", "twine")
+    session.install("build", "twine")
 
-    session.run("check-manifest", "--verbose")
     # If no argument is passed, build builds an sdist and then a wheel from
     # that sdist.
     session.run("python", "-m", "build")
 
-    session.run("twine", "check", "dist/*")
+    session.run("twine", "check", "--strict", "dist/*")

@@ -3,7 +3,6 @@
 # Manual page: ‘dh_installman(1)’.
 
 debian/towncrier.1
-docs/_build/man/towncrier.7
 
 
 # Local variables:

@@ -5,17 +5,17 @@
 Build a combined news file from news fragments.
 """
 
-
 from __future__ import annotations
 
 import os
 import sys
 
 from datetime import date
+from pathlib import Path
 
 import click
 
-from click import Context, Option
+from click import Context, Option, UsageError
 
 from towncrier import _git
 
@@ -23,6 +23,12 @@ from ._builder import find_fragments, render_fragments, split_fragments
 from ._project import get_project_name, get_version
 from ._settings import ConfigError, config_option_help, load_config_from_options
 from ._writer import append_to_newsfile
+
+
+if sys.version_info < (3, 10):
+    import importlib_resources as resources
+else:
+    from importlib import resources
 
 
 def _get_date() -> str:
@@ -78,7 +84,12 @@ def _validate_answer(ctx: Context, param: Option, value: bool) -> bool:
     default=None,
     help="Render the news fragments using given version.",
 )
-@click.option("--date", "project_date", default=None)
+@click.option(
+    "--date",
+    "project_date",
+    default=None,
+    help="Render the news fragments using the given date.",
+)
 @click.option(
     "--yes",
     "answer_yes",
@@ -140,40 +151,46 @@ def __main(
     base_directory, config = load_config_from_options(directory, config_file)
     to_err = draft
 
+    if project_version is None:
+        project_version = config.version
+    if project_version is None:
+        if not config.package:
+            raise UsageError(
+                "'--version' is required since the config file does "
+                "not contain 'version' or 'package'."
+            )
+        project_version = get_version(
+            os.path.join(base_directory, config.package_dir), config.package
+        ).strip()
+
     click.echo("Loading template...", err=to_err)
-    with open(config.template, "rb") as tmpl:
-        template = tmpl.read().decode("utf8")
+    if isinstance(config.template, tuple):
+        template = (
+            resources.files(config.template[0])
+            .joinpath(config.template[1])
+            .read_text(encoding="utf-8")
+        )
+        template_extension = os.path.splitext(config.template[1])[1]
+    else:
+        template = Path(config.template).read_text(encoding="utf-8")
+        template_extension = os.path.splitext(config.template)[1]
+    is_markdown = template_extension.lower() == ".md"
 
     click.echo("Finding news fragments...", err=to_err)
 
-    if config.directory is not None:
-        fragment_base_directory = os.path.abspath(config.directory)
-        fragment_directory = None
-    else:
-        fragment_base_directory = os.path.abspath(
-            os.path.join(base_directory, config.package_dir, config.package)
-        )
-        fragment_directory = "newsfragments"
-
-    fragment_contents, fragment_filenames = find_fragments(
-        fragment_base_directory,
-        config.sections,
-        fragment_directory,
-        config.types,
-        config.orphan_prefix,
+    fragment_contents, fragment_files = find_fragments(
+        base_directory,
+        config,
+        # Fail if any fragment filenames are invalid only if ignore list is set
+        # (this maintains backward compatibility):
+        strict=(config.ignore is not None),
     )
+    fragment_filenames = [filename for (filename, _category) in fragment_files]
 
     click.echo("Rendering news fragments...", err=to_err)
     fragments = split_fragments(
         fragment_contents, config.types, all_bullets=config.all_bullets
     )
-
-    if project_version is None:
-        project_version = config.version
-        if project_version is None:
-            project_version = get_version(
-                os.path.join(base_directory, config.package_dir), config.package
-            ).strip()
 
     if project_name is None:
         project_name = config.name
@@ -191,22 +208,10 @@ def __main(
     if project_date is None:
         project_date = _get_date().strip()
 
-    if config.title_format:
-        top_line = config.title_format.format(
-            name=project_name, version=project_version, project_date=project_date
-        )
-        render_title_with_fragments = False
-        render_title_separately = True
-    elif config.title_format is False:
-        # This is an odd check but since we support both "" and False with
-        # different effects we have to do something a bit abnormal here.
-        top_line = ""
-        render_title_separately = False
-        render_title_with_fragments = False
-    else:
-        top_line = ""
-        render_title_separately = False
-        render_title_with_fragments = True
+    # Render the title in the template if the title format is set to "". It can
+    # alternatively be set to False or a string, in either case it shouldn't be rendered
+    # in the template.
+    render_title = config.title_format == ""
 
     rendered = render_fragments(
         # The 0th underline is used for the top line
@@ -219,18 +224,21 @@ def __main(
         {"name": project_name, "version": project_version, "date": project_date},
         top_underline=config.underlines[0],
         all_bullets=config.all_bullets,
-        render_title=render_title_with_fragments,
+        render_title=render_title,
     )
 
-    if render_title_separately:
-        content = "\n".join(
-            [
-                top_line,
-                config.underlines[0] * len(top_line),
-                rendered,
-            ]
+    if config.title_format:
+        top_line = config.title_format.format(
+            name=project_name, version=project_version, project_date=project_date
         )
+        if is_markdown:
+            parts = [top_line]
+        else:
+            parts = [top_line, config.underlines[0] * len(top_line)]
+        parts.append(rendered)
+        content = "\n".join(parts)
     else:
+        top_line = ""
         content = rendered
 
     if draft:
@@ -240,38 +248,39 @@ def __main(
             err=to_err,
         )
         click.echo(content)
-    else:
-        click.echo("Writing to newsfile...", err=to_err)
-        news_file = config.filename
+        return
 
-        if config.single_file is False:
-            # The release notes for each version are stored in a separate file.
-            # The name of that file is generated based on the current version and project.
-            news_file = news_file.format(
-                name=project_name, version=project_version, project_date=project_date
-            )
+    click.echo("Writing to newsfile...", err=to_err)
+    news_file = config.filename
 
-        append_to_newsfile(
-            base_directory,
-            news_file,
-            config.start_string,
-            top_line,
-            content,
-            single_file=config.single_file,
+    if config.single_file is False:
+        # The release notes for each version are stored in a separate file.
+        # The name of that file is generated based on the current version and project.
+        news_file = news_file.format(
+            name=project_name, version=project_version, project_date=project_date
         )
 
-        click.echo("Staging newsfile...", err=to_err)
-        _git.stage_newsfile(base_directory, news_file)
+    append_to_newsfile(
+        base_directory,
+        news_file,
+        config.start_string,
+        top_line,
+        content,
+        single_file=config.single_file,
+    )
 
+    click.echo("Staging newsfile...", err=to_err)
+    _git.stage_newsfile(base_directory, news_file)
+
+    if should_remove_fragment_files(
+        fragment_filenames,
+        answer_yes,
+        answer_keep,
+    ):
         click.echo("Removing news fragments...", err=to_err)
-        if should_remove_fragment_files(
-            fragment_filenames,
-            answer_yes,
-            answer_keep,
-        ):
-            _git.remove_files(fragment_filenames)
+        _git.remove_files(fragment_filenames)
 
-        click.echo("Done!", err=to_err)
+    click.echo("Done!", err=to_err)
 
 
 def should_remove_fragment_files(
@@ -279,6 +288,9 @@ def should_remove_fragment_files(
     answer_yes: bool,
     answer_keep: bool,
 ) -> bool:
+    if not fragment_filenames:
+        click.echo("No news fragments to remove. Skipping!")
+        return False
     try:
         if answer_keep:
             click.echo("Keeping the following files:")

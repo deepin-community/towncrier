@@ -11,18 +11,14 @@ PACKAGE_NAME = towncrier
 
 MAIN_PYTHON_PACKAGE = towncrier
 
-# Current ‘pyproject’ support does not support specifying custom installation
-# directories. We lean on deprecated Distutils.
-export PYBUILD_SYSTEM = distutils
-
-package_share_dir = /usr/share/${PACKAGE_NAME}
-export PYBUILD_INSTALL_ARGS = \
-	--install-lib=${package_share_dir}/ \
-	--install-scripts=${package_share_dir}/
-
 # Send HTTP traffic to the “discard” service during packaging actions.
 export http_proxy = http://127.0.1.1:9/
 export https_proxy = ${http_proxy}
+
+export PYBUILD_SYSTEM := pyproject
+
+export PYBUILD_INSTALL_ARGS ?= \
+	--install-option="--install-layout=deb"
 
 export PYBUILD_TEST_ARGS = "{dir}"/src/
 
@@ -30,27 +26,16 @@ export PYBUILD_TEST_ARGS = "{dir}"/src/
 twisted_trial_cruft = ${MAIN_PYTHON_PACKAGE}.test.*
 export PYBUILD_AFTER_TEST = rm -r "{build_dir}"/${twisted_trial_cruft}
 
-DOCUMENTATION_DIR = {dir}/docs
-DOCUMENTATION_BUILD_DIR = ${DOCUMENTATION_DIR}/_build
-DOCUMENTATION_BUILD_HTML_DIR = ${DOCUMENTATION_BUILD_DIR}/html
-DOCUMENTATION_BUILD_MANPAGE_DIR = ${DOCUMENTATION_BUILD_DIR}/man
-
-export PYBUILD_AFTER_BUILD = \
-	make SPHINXBUILD='python3 -m sphinx' \
-	    PYTHONPATH="{dir}/src:$$PYTHONPATH" \
-	    --directory ${DOCUMENTATION_DIR} \
-	    html man
-
 
 %:
-	dh $@ --with python3,sphinxdoc --buildsystem=pybuild
+	dh $@ --with python3 --buildsystem=pybuild
 
 
 override_dh_installchangelogs:
 	dh_installchangelogs NEWS.rst
 
 
-# Copyright © 2010–2023 Ben Finney <bignose@debian.org>
+# Copyright © 2010–2024 Ben Finney <bignose@debian.org>
 #
 # This is free software: you may copy, modify, and/or distribute this work
 # under the terms of the GNU General Public License as published by the

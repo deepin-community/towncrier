@@ -1,20 +1,35 @@
-towncrier (22.12.0-2) UNRELEASED; urgency=medium
+towncrier (24.8.0-2) unstable; urgency=medium
 
-  * debian/patches/avoid-bytes-type-in-test-process-output.patch:
-    * Avoid `bytes` type in test process output.
+  * Remove unused “Build-Depends-Indep: python3-mock”.
+    The upstream release uses only ‘unittest.mock’ from the standard library.
+  * Switch build dependency to ‘python3-tomli’, specified in upstream project.
+  * Resume installing Python library as a public shared library.
+    Closes: bug#1087787. Thanks to Santiago Vila for the report; thanks to
+    Colin Watson for the diagnosis.
+
+ -- Ben Finney <bignose@debian.org>  Wed, 20 Nov 2024 17:07:04 +1100
+
+towncrier (24.8.0-1) unstable; urgency=medium
+
+  * The “Myrtle Cagle” release.
+  * New upstream release.
+    Highlights since previous release:
+    * Support Python version 3.8 – 3.12.
+    * Provide a default template if Markdown is selected.
+    * Generated output no longer adds extra line breaks.
+    * Gracefully handle news fragments that are not in VCS repository.
+    * Prompt interactively when no fragment filename is specified.
+  * Declare conformance to “Standards-Version: 4.7.0”.
+    No additional changes needed.
+  * Switch to ‘pyproject’ build system.
+    Closes: bug#1083804. Thanks to Matthias Klose for the report.
+  * debian/patches/:
+    * Remove patches resolved in new upstream release.
   * debian/patches/test-current-version-in-output.patch:
     * Test the actual current version is in the test output.
-  * debian/patches/test-executable-via-clirunner.patch:
-    * Consistently use click.testing.CliRunner for testing executable
-      command.
-  * Revert to ‘distutils’ build system, to control install directories.
   * Install to an application directory, not a shared Python library.
-  * Remove tracking images from the documentation.
-  * Build and install package documentation.
-  * Move the “overall documentation” manual page to manual section 7.
-  * Build and install upstream manual page.
 
- --
+ -- Ben Finney <bignose@debian.org>  Sun, 20 Oct 2024 13:34:11 +1100
 
 towncrier (22.12.0-1) unstable; urgency=medium
 
